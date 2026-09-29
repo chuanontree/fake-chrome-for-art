@@ -55,7 +55,8 @@ body{
 .page.show{display:block}
 
 /* ★ 起始頁(先做成 Chrome 樣式) */
-#startpage{background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:40px}
+#startpage{background:#fff;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:40px}
+#startpage.show{display:flex}
 #startpage .mark{font-size:26px;letter-spacing:.35em;font-weight:300;color:#202124;margin-bottom:34px;padding-left:.35em}
 #startpage .fakebox{display:flex;align-items:center;gap:10px;width:min(560px,90%);height:46px;padding:0 18px;border-radius:24px;border:1px solid var(--line);box-shadow:0 1px 6px rgba(32,33,36,.12)}
 #startpage .fakebox svg{width:18px;height:18px;fill:var(--icon)}

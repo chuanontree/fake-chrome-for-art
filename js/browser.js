@@ -40,7 +40,20 @@ function cur(){ return tabs.find(t => t.id === active); }
 function select(id){
   active = id;
   tabs.forEach(t => { t.frame.style.display = (t.id===id && t.cur!==NEWTAB && !refused(t.cur||"")) ? "block" : "none"; });
+  paint();
   render();
+}
+/* 依作用中分頁決定要露出哪張作者頁(起始頁 / 拒絕頁)*/
+function paint(){
+  const t = cur();
+  document.querySelectorAll(".page").forEach(p => p.classList.remove("show"));
+  if(!t || !t.cur) return;
+  if(t.cur === NEWTAB){
+    document.getElementById("startpage").classList.add("show");
+  } else if(refused(t.cur)){
+    document.getElementById("rhost").textContent = hostOf(t.cur);
+    document.getElementById("rupture").classList.add("show");
+  }
 }
 function go(u, push){
   const t = cur(); if(!t) return;
@@ -48,21 +61,18 @@ function go(u, push){
   if(push){ t.hist = t.hist.slice(0, t.hi+1); t.hist.push(dest); t.hi++; }
   t.cur = dest;
 
-  document.querySelectorAll(".page").forEach(p => p.classList.remove("show"));
   if(dest === NEWTAB){
     t.frame.style.display = "none";
-    document.getElementById("startpage").classList.add("show");
     t.title = "新分頁";
   } else if(refused(dest)){
     t.frame.style.display = "none";
-    document.getElementById("rhost").textContent = hostOf(dest);
-    document.getElementById("rupture").classList.add("show");
     t.title = hostOf(dest);
   } else {
     t.frame.src = dest;
     t.frame.style.display = "block";
     t.title = hostOf(dest);
   }
+  paint();
   render();
 }
 const back   = () => { const t=cur(); if(t&&t.hi>0){ t.hi--; go(t.hist[t.hi],false);} };
