@@ -48,6 +48,17 @@
         <p>它送回一道標頭,告訴瀏覽器:不要把我裝進別人的框裡。真實的網路保有它自己的主權——而你正看著這道邊界。</p>
       </div>
     </div>
+
+    <!-- 連線錯誤頁(電腦版網站真的連不上時)— 擬態 Chrome,不是作者頁 -->
+    <div class="page" id="neterror">
+      <div class="inner">
+        <svg class="icon" viewBox="0 0 72 72"><path d="M18 8h26l14 14v42H18z" fill="none" stroke="#5f6368" stroke-width="4"/><path d="M44 8v14h14" fill="none" stroke="#5f6368" stroke-width="4"/><circle cx="30" cy="38" r="3" fill="#5f6368"/><circle cx="46" cy="38" r="3" fill="#5f6368"/><path d="M29 54q9-8 18 0" fill="none" stroke="#5f6368" stroke-width="4" stroke-linecap="round"/></svg>
+        <h1>無法連上這個網站</h1>
+        <p id="nmsg"></p>
+        <div class="code" id="ncode"></div>
+        <button id="nreload">重新載入</button>
+      </div>
+    </div>
   </div>
 </div>
 

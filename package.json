@@ -5,9 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "npx --yes serve -l 5173 .",
-    "start": "npx --yes serve -l 5173 ."
+    "start": "npx --yes serve -l 5173 .",
+    "app": "electron .",
+    "kiosk": "electron . --kiosk"
   },
   "author": "chuanontree (Wu Wei-Chieh)",
   "license": "UNLICENSED",
-  "private": true
+  "private": true,
+  "main": "electron/main.cjs",
+  "devDependencies": {
+    "electron": "^44.4.5"
+  }
 }

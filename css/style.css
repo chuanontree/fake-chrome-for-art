@@ -17,7 +17,7 @@ body{
   font-family:system-ui,"Segoe UI","Noto Sans TC",Roboto,Arial,sans-serif;
   background:var(--strip);color:var(--text);overflow:hidden;-webkit-font-smoothing:antialiased;
 }
-.win{display:flex;flex-direction:column;height:100vh}
+.win{display:flex;flex-direction:column;position:fixed;inset:0}  /* fixed:iPad 叫出鍵盤時殼不會被捲走 */
 
 /* ── 分頁列 ── */
 .strip{display:flex;align-items:flex-end;height:40px;padding:6px 6px 0;background:var(--strip);flex:0 0 auto}
@@ -26,6 +26,7 @@ body{
   cursor:default;position:relative;user-select:none}
 .tab .fav{width:16px;height:16px;flex:0 0 16px;border-radius:3px;
   background:#c7cace url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='%235f6368'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3C/svg%3E") center/12px no-repeat}
+.tab .fav.img{background:center/16px no-repeat;border-radius:0}
 .tab .ttl{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;flex:1}
 .tab .x{width:16px;height:16px;border-radius:50%;flex:0 0 16px;display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--icon)}
 .tab .x:hover{background:#c7cace}
@@ -50,7 +51,7 @@ body{
 
 /* ── 內容區 ── */
 .view{flex:1;position:relative;background:#fff;overflow:hidden}
-.view iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff}
+.view iframe,.view webview{position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff}
 .page{position:absolute;inset:0;overflow:auto;display:none}
 .page.show{display:block}
 
@@ -73,3 +74,19 @@ body{
 #rupture h1{font-size:22px;font-weight:400;letter-spacing:.04em;margin-bottom:22px}
 #rupture p{font-size:14px;color:#a9a9ad;max-width:46ch}
 #rupture .host{color:#e7e7e9}
+
+/* 連線錯誤頁 — 擬態 Chrome 的錯誤頁(電腦版才會出現) */
+#neterror{background:#fff;color:#202124}
+#neterror .inner{max-width:600px;margin:0 auto;padding:14vh 32px 40px}
+#neterror .icon{width:72px;height:72px;margin-bottom:40px}
+#neterror h1{font-size:24px;font-weight:500;margin-bottom:16px}
+#neterror p{font-size:15px;line-height:1.6;color:#5f6368}
+#neterror p b{color:#202124;font-weight:500}
+#neterror .code{margin-top:14px;font-size:12px;color:#5f6368;letter-spacing:.02em}
+#neterror button{float:right;margin-top:48px;padding:9px 22px;border:0;border-radius:4px;background:#1a73e8;color:#fff;font:500 14px system-ui,sans-serif;cursor:default}
+
+/* ── 電腦版(Electron):分頁列就是視窗標題列 ── */
+.app .strip{-webkit-app-region:drag}
+.app .tab,.app .newtab{-webkit-app-region:no-drag}
+.app.mac .strip{padding-left:80px}     /* 讓出 macOS 紅綠燈 */
+.app.other .strip{padding-right:140px} /* 讓出 Windows 視窗按鈕 */
