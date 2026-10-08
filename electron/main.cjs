@@ -6,6 +6,7 @@
    ═══════════════════════════════════════════════════════════ */
 const { app, BrowserWindow, Menu } = require("electron");
 const path = require("path");
+const collector = require("./collector.cjs");
 
 const KIOSK = process.argv.includes("--kiosk");
 const MAC   = process.platform === "darwin";
@@ -74,9 +75,19 @@ function menu(){
       { role: "togglefullscreen" },
       { role: "toggleDevTools" },
     ]},
+    { label: "Threads 蒐集", submenu: [
+      { label: "蒐集中", type: "checkbox", checked: collector.isRunning(),
+        click: () => collector.isRunning() ? collector.stop() : collector.start() },
+      { label: "顯示 / 隱藏蒐集視窗", click: () => collector.toggleWindow() },
+      { label: "打開設定檔", click: () => collector.openConfig() },
+    ]},
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(tpl));
 }
 
-app.whenReady().then(() => { menu(); createWindow(); });
+app.whenReady().then(() => {
+  collector.onChange(menu);
+  menu(); createWindow();
+  collector.init();
+});
 app.on("window-all-closed", () => app.quit());
