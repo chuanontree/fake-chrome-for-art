@@ -207,6 +207,9 @@ if(APP){
     reload, back, fwd,
   };
   APP.onCommand((cmd, arg) => cmds[cmd]?.(arg));
+  /* 「⋮」:跳出 Chrome 式選單(對齊按鈕右下角) */
+  const more = document.getElementById("more");
+  more.onclick = () => { const r = more.getBoundingClientRect(); APP.moreMenu(r.right - 220, r.bottom); };
 }
 
 /* ── 開場 ── */
