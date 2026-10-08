@@ -50,8 +50,12 @@ function loadConfig(){
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const between = ([a, b]) => (a + Math.random() * (b - a)) * 1000;
-const log = (...a) => console.log(new Date().toTimeString().slice(0, 8), "[蒐集]", ...a);
 const send = obj => udp.send(Buffer.from(JSON.stringify(obj)), cfg.bridge_port, cfg.bridge_host);
+/* 同時印出並送給橋接程式,讓黑色視窗看得到蒐集器在做什麼 */
+const log = (...a) => {
+  console.log(new Date().toTimeString().slice(0, 8), "[蒐集]", ...a);
+  if(cfg) send({ type: "log", msg: a.join(" ") });
+};
 const changed = () => listeners.forEach(f => f());
 
 /* ── 從任何 JSON 裡找出「串文」:有 code、caption.text、user.username 的物件 ── */
@@ -83,7 +87,6 @@ function parseJsonish(text){
 function harvest(text){
   if(!current || !text || text.length < 20) return;
   const { slug, kw } = current;
-  let n = 0;
   for(const json of parseJsonish(text)){
     for(const p of findPosts(json)){
       if(seen.has(p.id)) continue;
@@ -95,10 +98,9 @@ function harvest(text){
         timestamp: p.taken_at ? new Date(p.taken_at * 1000).toISOString() : "",
         permalink: `https://www.threads.com/@${p.username}/post/${p.code}`,
       });
-      n++;
+      current.n++;
     }
   }
-  if(n) log(`「${kw}」新串文 ${n} 則`);
 }
 
 /* ── 看不見的瀏覽視窗(跟偽 Chrome 共用登入)── */
@@ -147,11 +149,12 @@ async function round(){
   timer = null;
   if(!running) return;
   ok = true;
+  /* 每輪都重送全部:橋接程式會去重。這樣橋接程式晚開、重開,都不會漏掉資料 */
+  seen.clear();
   const list = Object.entries(cfg.keywords);
   for(let i = 0; i < list.length && running; i++){
     const [slug, kw] = list[i];
-    current = { slug, kw };
-    log(`搜尋「${kw}」`);
+    current = { slug, kw, n: 0 };
     try{ await bot.loadURL(cfg.search_url.replace("%s", encodeURIComponent(kw))); }
     catch(e){ if(!String(e).includes("ERR_ABORTED")){ ok = false; log("載入失敗:", e.message); } }
     await sleep(between([3, 6]));
@@ -167,6 +170,7 @@ async function round(){
       await sleep(between(cfg.scroll_gap_sec));
       await harvestEmbedded();
     }
+    log(`搜尋「${kw}」:讀到 ${current.n} 則含關鍵字的串文`);
     current = null;
     if(i < list.length - 1) await sleep(between(cfg.keyword_gap_sec));
   }
@@ -185,7 +189,8 @@ function start(){
   if(!bot) makeBot();
   running = true;
   log(`開始蒐集:${Object.values(cfg.keywords).join("、")} → ${cfg.bridge_host}:${cfg.bridge_port}`);
-  statusTimer = setInterval(() => send({ type: "status", ok, next: Math.max(0, (nextAt - Date.now()) / 1000) }), 1000);
+  statusTimer = setInterval(() => send({ type: "status", ok, next: Math.max(0, (nextAt - Date.now()) / 1000),
+                                         interval: cfg.interval_min * 60 }), 1000);
   round();
   changed();
 }
