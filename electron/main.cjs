@@ -13,7 +13,7 @@ const MAC   = process.platform === "darwin";
 /* 讓網站以為這是一般的 Chrome(拿掉 Electron 與本程式的識別字) */
 app.userAgentFallback = app.userAgentFallback
   .replace(/ Electron\/\S+/, "")
-  .replace(/ chuanontree-browser\/\S+/, "");
+  .replace(` ${app.getName()}/${app.getVersion()}`, "");
 
 let win;
 

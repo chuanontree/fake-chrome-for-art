@@ -55,6 +55,8 @@ npm run dev      # 起一個靜態伺服器,通常在 http://localhost:5173
 沒有 npm 也可以:`python3 -m http.server 5173` 然後開 `http://localhost:5173`。
 
 電腦版:`npm install` 後 `npm run app`(展場用 `npm run kiosk`)。
+打包:`npm run package:mac` / `package:win` / `package:linux`(輸出到 `dist/`)。
+`.github/workflows/desktop.yml` 會在 GitHub 的 Mac / Windows 機器打包,發佈到 Release `desktop-latest`。
 
 ## 部署到 GitHub Pages
 
