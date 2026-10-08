@@ -8,9 +8,9 @@
     "start": "npx --yes serve -l 5173 .",
     "app": "electron .",
     "kiosk": "electron . --kiosk",
-    "package:mac": "electron-packager . chuanontree --out=dist --overwrite --app-bundle-id=io.github.chuanontree.browser --platform=darwin --arch=universal --ignore=\"^/dist\" --ignore=\"^/[.]github\" --ignore=\"^/(CLAUDE|README)[.]md\"",
-    "package:win": "electron-packager . chuanontree --out=dist --overwrite --app-bundle-id=io.github.chuanontree.browser --platform=win32 --arch=x64 --ignore=\"^/dist\" --ignore=\"^/[.]github\" --ignore=\"^/(CLAUDE|README)[.]md\"",
-    "package:linux": "electron-packager . chuanontree --out=dist --overwrite --app-bundle-id=io.github.chuanontree.browser --platform=linux --arch=x64 --ignore=\"^/dist\" --ignore=\"^/[.]github\" --ignore=\"^/(CLAUDE|README)[.]md\""
+    "package:mac": "electron-packager . chuanontree --out=dist --overwrite --app-bundle-id=io.github.chuanontree.browser --platform=darwin --arch=universal --ignore=\"^/dist\" --ignore=\"^/[.]github\" --ignore=\"^/(CLAUDE|README)[.]md\" --ignore=\"^/td-threads\"",
+    "package:win": "electron-packager . chuanontree --out=dist --overwrite --app-bundle-id=io.github.chuanontree.browser --platform=win32 --arch=x64 --ignore=\"^/dist\" --ignore=\"^/[.]github\" --ignore=\"^/(CLAUDE|README)[.]md\" --ignore=\"^/td-threads\"",
+    "package:linux": "electron-packager . chuanontree --out=dist --overwrite --app-bundle-id=io.github.chuanontree.browser --platform=linux --arch=x64 --ignore=\"^/dist\" --ignore=\"^/[.]github\" --ignore=\"^/(CLAUDE|README)[.]md\" --ignore=\"^/td-threads\""
   },
   "author": "chuanontree (Wu Wei-Chieh)",
   "license": "UNLICENSED",

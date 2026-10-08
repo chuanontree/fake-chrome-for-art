@@ -63,3 +63,8 @@ push 到 `main` 會透過 `.github/workflows/deploy.yml` 自動部署。
 到 repo Settings → Pages → Source 選 **GitHub Actions**,第一次設定即可。
 
 詳細脈絡與守則見 `CLAUDE.md`。
+
+## 延伸:Threads 關鍵字 → TouchDesigner
+
+`td-threads/` 用 Threads 官方 API 追蹤「炎上 / 公審 / 抵制」,把串文與熱度即時用 OSC 送進
+TouchDesigner。步驟見 [`td-threads/README.md`](td-threads/README.md)。
