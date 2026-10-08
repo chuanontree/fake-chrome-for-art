@@ -150,6 +150,9 @@ class Bridge:
             self.inbox = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.inbox.bind((cfg.get("browser_listen_host", "127.0.0.1"), int(cfg.get("browser_listen_port", 7010))))
             self.inbox.setblocking(False)
+            self.linked = False            # 有沒有收到蒐集器的狀態
+            self.last_status = 0.0
+            self.round_interval = 900.0    # 蒐集器每輪間隔(秒),用來攤平釋放
         self.kws = cfg["keywords"]                       # {slug: 關鍵字}
         self.osc = Osc(cfg["osc_host"], cfg["osc_port_values"], cfg["osc_port_posts"])
         state = load_json(STATE_PATH, {}) if not demo else {}
@@ -206,14 +209,24 @@ class Bridge:
             except ValueError:
                 continue
             if m.get("type") == "status":
+                if not self.linked:
+                    log("已連上偽 Chrome 的「Threads 蒐集」")
+                    self.linked = True
+                self.last_status = time.time()
                 self.ok = 1.0 if m.get("ok") else 0.0
                 self.next_poll = time.time() + float(m.get("next", 0))
+                self.round_interval = float(m.get("interval", self.round_interval))
+            elif m.get("type") == "log":
+                log(f"[偽 Chrome] {m.get('msg', '')}")
             elif m.get("type") == "post" and m.get("slug") in self.kws and m.get("id") not in self.seen_set:
                 self.seen.append(m["id"]); self.seen_set.add(m["id"])
                 self.queue.append((m["slug"], m)); fresh = True
         if fresh:
             self.seen_set = set(self.seen)
             save_json(STATE_PATH, {"seen": list(self.seen)})
+        if self.linked and time.time() - self.last_status > 5:
+            log("與偽 Chrome 的「Threads 蒐集」斷線(偽 Chrome 關了,或蒐集中被取消勾選)")
+            self.linked, self.ok = False, 0.0
 
     def release(self, slug, p):
         now = time.time()
@@ -276,7 +289,10 @@ class Bridge:
             # 把一批新串文平均攤到下一次查詢前慢慢釋放,TD 收到的是穩定的流,不是一次爆量
             if self.queue and now >= next_release:
                 self.release(*self.queue.popleft())
-                gap = max(1.0, self.next_poll - now) / (len(self.queue) + 1)
+                horizon = self.next_poll - now
+                if self.browser and horizon < 1:      # 蒐集器正在搜尋中(還沒排下一輪),用每輪間隔估
+                    horizon = self.round_interval
+                gap = max(1.0, horizon) / (len(self.queue) + 1)
                 next_release = now + min(gap, float(self.cfg.get("max_release_gap_sec", 20)))
             self.send_values(now - last)
             last = now
