@@ -1,0 +1,19 @@
+{
+  "access_token": "",
+  "keywords": {
+    "flame": "炎上",
+    "trial": "公審",
+    "boycott": "抵制"
+  },
+  "search_type": "RECENT",
+  "daily_query_budget": 60,
+  "anonymize": true,
+  "heat_per_post": 0.25,
+  "heat_half_life_sec": 600,
+  "max_release_gap_sec": 20,
+  "osc_host": "127.0.0.1",
+  "osc_port_values": 7000,
+  "osc_port_posts": 7001,
+  "csv": "threads_log.csv",
+  "api_base": "https://graph.threads.net/v1.0"
+}

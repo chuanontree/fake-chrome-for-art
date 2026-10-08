@@ -1,0 +1,31 @@
+{
+  "project": "threads-heat",
+  "description": "Threads 關鍵字(炎上/公審/抵制)→ OSC → TouchDesigner 熱度視覺",
+  "osc": {
+    "values": {"port": 7000, "op": "/project1/input/osc_values (oscinCHOP)",
+      "addresses": ["/kw/<slug>/heat 0~1", "/kw/<slug>/total", "/kw/<slug>/hour", "/status/ok 0|1", "/status/next 秒"]},
+    "posts": {"port": 7001, "op": "/project1/input/osc_posts (oscinDAT)",
+      "address": "/post", "args": ["slug", "keyword", "author", "text", "timestamp", "permalink"]}
+  },
+  "keywords": {"flame": "炎上", "trial": "公審", "boycott": "抵制"},
+  "network": {
+    "/project1/input": [
+      {"name": "osc_values", "type": "oscinCHOP", "pars": {"port": 7000}},
+      {"name": "osc_posts", "type": "oscinDAT", "pars": {"port": 7001, "callbacks": "posts_callbacks"}},
+      {"name": "posts_callbacks", "type": "textDAT", "note": "onReceiveOSC → posts,保留 50 則"},
+      {"name": "posts", "type": "tableDAT", "cols": ["slug", "keyword", "author", "text", "time"]}
+    ],
+    "/project1/logic": [
+      {"name": "chan", "type": "textDAT", "note": "get('flame/heat') 讀 osc_values 通道,相容 / 與 _ 兩種命名"}
+    ],
+    "/project1/output": [
+      {"name": "bg", "type": "constantTOP", "res": [1920, 1080]},
+      {"name": "bar_<slug>", "type": "rectangleTOP", "note": "寬度 = heat"},
+      {"name": "label_<slug>", "type": "textTOP", "note": "關鍵字、累計、最近一小時"},
+      {"name": "latest_post", "type": "textTOP", "note": "posts 最後一列的內文"},
+      {"name": "status", "type": "textTOP", "note": "連線狀態、下次查詢倒數"},
+      {"name": "comp", "type": "compositeTOP", "operand": "over", "inputs": ["bg", "bar/label × 3", "latest_post", "status"]},
+      {"name": "out", "type": "nullTOP", "input": "comp"}
+    ]
+  }
+}
