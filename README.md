@@ -18,6 +18,21 @@ npm run dev
 電腦版用 Electron 把同一個外殼變成真的瀏覽器,**任何網站都能真的進入**,不再拒絕;
 網站真的連不上時,顯示擬態 Chrome 的「無法連上這個網站」。
 
+### 下載即用(推薦)
+
+到 **[Releases → 偽 Chrome 電腦版(最新)](https://github.com/chuanontree/fake-chrome-for-art/releases/latest)** 下載:
+
+- **Mac**:`chuanontree-mac.zip` → 解壓縮 → 把 `chuanontree` 拖進「應用程式」→ 雙擊開啟。
+  第一次若被擋下,到「系統設定 → 隱私權與安全性」按「仍要打開」。
+  (若顯示「已損毀」,在終端機執行 `xattr -cr /Applications/chuanontree.app` 再開。)
+- **Windows**:`chuanontree-windows.zip` → 解壓縮 → 執行資料夾裡的 `chuanontree.exe`。
+  若出現 SmartScreen,按「其他資訊」→「仍要執行」。
+
+每次推送到 `main` 會由 `.github/workflows/desktop.yml` 自動重新打包。
+展場全螢幕:Mac 執行 `open -a chuanontree --args --kiosk`,Windows 執行 `chuanontree.exe --kiosk`。
+
+### 從原始碼執行(開發用)
+
 需要先安裝 [Node.js](https://nodejs.org)(LTS 版即可),然後在專案資料夾:
 
 ```bash
