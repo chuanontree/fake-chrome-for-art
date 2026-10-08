@@ -4,4 +4,5 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("chuanontree", {
   platform: process.platform,
   onCommand: cb => ipcRenderer.on("shell", (_e, cmd, arg) => cb(cmd, arg)),
+  moreMenu: (x, y) => ipcRenderer.send("more-menu", x, y),
 });

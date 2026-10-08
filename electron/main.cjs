@@ -4,7 +4,7 @@
    不受 X-Frame-Options 限制,任何網站都能真的進入。
    殼的畫面仍是同一份 index.html / css / js。
    ═══════════════════════════════════════════════════════════ */
-const { app, BrowserWindow, Menu } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain } = require("electron");
 const path = require("path");
 const collector = require("./collector.cjs");
 
@@ -75,15 +75,33 @@ function menu(){
       { role: "togglefullscreen" },
       { role: "toggleDevTools" },
     ]},
-    { label: "Threads 蒐集", submenu: [
-      { label: "蒐集中", type: "checkbox", checked: collector.isRunning(),
-        click: () => collector.isRunning() ? collector.stop() : collector.start() },
-      { label: "顯示 / 隱藏蒐集視窗", click: () => collector.toggleWindow() },
-      { label: "打開設定檔", click: () => collector.openConfig() },
-    ]},
+    { label: "Threads 蒐集", submenu: threadsItems() },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(tpl));
 }
+
+function threadsItems(){
+  return [
+    { label: "蒐集中", type: "checkbox", checked: collector.isRunning(),
+      click: () => collector.isRunning() ? collector.stop() : collector.start() },
+    { label: "顯示 / 隱藏蒐集視窗", click: () => collector.toggleWindow() },
+    { label: "打開設定檔", click: () => collector.openConfig() },
+  ];
+}
+
+/* 「⋮」按鈕跳出的選單,跟 Chrome 一樣。Windows 隱藏了標題列,選單列看不到,所以功能都要能從這裡找到。 */
+ipcMain.on("more-menu", (_e, x, y) => {
+  const send = cmd => () => win?.webContents.send("shell", cmd);
+  Menu.buildFromTemplate([
+    { label: "新分頁", accelerator: "CmdOrCtrl+T", click: send("new-tab") },
+    { type: "separator" },
+    { label: "Threads 蒐集", submenu: threadsItems() },
+    { type: "separator" },
+    { label: "全螢幕", role: "togglefullscreen" },
+    { label: "開發人員工具", role: "toggleDevTools" },
+    ...(MAC ? [] : [{ type: "separator" }, { label: "結束", role: "quit" }]),
+  ]).popup({ window: win, x: Math.round(x), y: Math.round(y) });
+});
 
 app.whenReady().then(() => {
   collector.onChange(menu);

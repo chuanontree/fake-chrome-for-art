@@ -73,13 +73,13 @@ Threads 官方 API ──(每 N 分鐘查詢)──▶ bridge/threads_bridge.py 
 
 1. 打開偽 Chrome 電腦版,在分頁裡進 `threads.com`,**用新帳號登入**。
 2. 雙擊 `bridge\start_browser.bat`(瀏覽器模式的橋接程式),讓黑色視窗開著。
-3. 回到偽 Chrome,選單 **Threads 蒐集 → 蒐集中** 打勾。
+3. 回到偽 Chrome,按網址列最右邊的 **⋮** → **Threads 蒐集 → 蒐集中** 打勾。
 4. TD 照第 3 步的做法,熱度條就會隨真實串文跳動。
 
 節奏刻意放慢,像人在看:每 15 分鐘(±15%)一輪;同一輪內,關鍵字之間停 20~45 秒;每個搜尋頁往下捲 3 次。
 蒐集器需要登入時會停下這一輪,把蒐集視窗叫出來讓你登入,下一輪自動繼續。
 
-設定在選單 **Threads 蒐集 → 打開設定檔**(`collector.json`):
+設定在 **⋮ → Threads 蒐集 → 打開設定檔**(`collector.json`):
 
 | 欄位 | 預設 | 說明 |
 |---|---|---|
@@ -90,7 +90,7 @@ Threads 官方 API ──(每 N 分鐘查詢)──▶ bridge/threads_bridge.py 
 | `scrolls` | 3 | 每個搜尋頁捲幾次 |
 | `require_keyword_in_text` | true | 只收內文真的含關鍵字的串文 |
 
-Threads 改版若讓蒐集失效(黑色視窗一直沒有新串文),選單 **顯示蒐集視窗** 看它停在哪一頁,截圖給我。
+Threads 改版若讓蒐集失效(黑色視窗一直沒有新串文),按 **⋮ → Threads 蒐集 → 顯示 / 隱藏蒐集視窗** 看它停在哪一頁,截圖給我。
 
 ### 4. 申請 Threads 官方 API
 
