@@ -29,6 +29,7 @@ Threads 官方 API ──(每 N 分鐘查詢)──▶ bridge/threads_bridge.py 
 | `bridge/config.example.json` | 設定範本:關鍵字、查詢額度、匿名、OSC port |
 | `bridge/start_demo.bat` | 雙擊:展示模式(不連網、假串文),先做視覺用 |
 | `bridge/start_bridge.bat` | 雙擊:正式模式(需要 access token) |
+| `bridge/start_browser.bat` | 雙擊:瀏覽器模式(接收偽 Chrome「Threads 蒐集」的資料,不用 API) |
 | `build_network.py` | 在 TD 裡一鍵長出整個網絡 |
 | `spec.json` | 節點規格(對照用) |
 
@@ -61,6 +62,35 @@ Threads 官方 API ──(每 N 分鐘查詢)──▶ bridge/threads_bridge.py 
 3. 把 `build_network.py` 拖進網絡編輯器。
 4. 按 `Alt+T` 開 Textport,輸入 `mod('build_network').build()` 按 Enter。
 5. 進到 `/project1/output`,看 `out` 這個節點:三條熱度條會隨假串文跳動,下方顯示最新一則。
+
+### 3.5 瀏覽器模式:用偽 Chrome 蒐集(不用官方 API)
+
+> **風險先講清楚:** 這是自動蒐集,違反 Meta 的使用條款,帳號可能被停用。
+> 請用另外開的帳號,不要用主帳號。蒐集器不會替你註冊、登入或通過驗證。
+
+偽 Chrome 電腦版內建「Threads 蒐集」:用一個看不見的視窗,以你在偽 Chrome 裡登入的帳號,
+定期打開 Threads 搜尋頁,讀取頁面載入的串文資料,交給橋接程式。TD 端完全不用改。
+
+1. 打開偽 Chrome 電腦版,在分頁裡進 `threads.com`,**用新帳號登入**。
+2. 雙擊 `bridge\start_browser.bat`(瀏覽器模式的橋接程式),讓黑色視窗開著。
+3. 回到偽 Chrome,選單 **Threads 蒐集 → 蒐集中** 打勾。
+4. TD 照第 3 步的做法,熱度條就會隨真實串文跳動。
+
+節奏刻意放慢,像人在看:每 15 分鐘(±15%)一輪;同一輪內,關鍵字之間停 20~45 秒;每個搜尋頁往下捲 3 次。
+蒐集器需要登入時會停下這一輪,把蒐集視窗叫出來讓你登入,下一輪自動繼續。
+
+設定在選單 **Threads 蒐集 → 打開設定檔**(`collector.json`):
+
+| 欄位 | 預設 | 說明 |
+|---|---|---|
+| `enabled` | false | true = 開程式就自動開始蒐集(展場用) |
+| `keywords` | 炎上/公審/抵制 | 要跟 `bridge/config.json` 的 `keywords` 一致 |
+| `interval_min` | 15 | 每輪間隔(分鐘)。不建議調低,越頻繁越容易被停權 |
+| `keyword_gap_sec` | [20, 45] | 關鍵字之間的隨機停頓 |
+| `scrolls` | 3 | 每個搜尋頁捲幾次 |
+| `require_keyword_in_text` | true | 只收內文真的含關鍵字的串文 |
+
+Threads 改版若讓蒐集失效(黑色視窗一直沒有新串文),選單 **顯示蒐集視窗** 看它停在哪一頁,截圖給我。
 
 ### 4. 申請 Threads 官方 API
 

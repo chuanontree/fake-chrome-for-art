@@ -7,6 +7,8 @@ Threads → TouchDesigner 橋接
     py threads_bridge.py            正式模式(需要 config.json 裡的 access token)
     py threads_bridge.py --demo     展示模式:不連網,產生假串文,用來先做 TD 視覺
     py threads_bridge.py --refresh  只更新 access token(延長 60 天)後結束
+    py threads_bridge.py --browser  瀏覽器模式:不用 API,接收偽 Chrome 電腦版
+                                    「Threads 蒐集」送來的串文(UDP 127.0.0.1:7010)
 
 送進 TD 的 OSC(預設 127.0.0.1):
   數值 → port 7000(OSC In CHOP)
@@ -142,8 +144,12 @@ def demo_posts(keywords):
 
 # ── 主程式 ────────────────────────────────────────────────
 class Bridge:
-    def __init__(self, cfg, demo):
-        self.cfg, self.demo = cfg, demo
+    def __init__(self, cfg, demo, browser=False):
+        self.cfg, self.demo, self.browser = cfg, demo, browser
+        if browser:                                      # 收偽 Chrome 蒐集器送來的 JSON
+            self.inbox = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.inbox.bind((cfg.get("browser_listen_host", "127.0.0.1"), int(cfg.get("browser_listen_port", 7010))))
+            self.inbox.setblocking(False)
         self.kws = cfg["keywords"]                       # {slug: 關鍵字}
         self.osc = Osc(cfg["osc_host"], cfg["osc_port_values"], cfg["osc_port_posts"])
         state = load_json(STATE_PATH, {}) if not demo else {}
@@ -187,6 +193,28 @@ class Bridge:
                 self.backoff = min(self.backoff * 2, 8)
             log(f"查詢失敗:{e}" + ("(呼叫太頻繁,放慢查詢)" if e.rate_limited else ""))
 
+    def drain(self):
+        """讀完蒐集器目前送來的所有訊息。"""
+        fresh = False
+        while True:
+            try:
+                data, _ = self.inbox.recvfrom(65535)
+            except (BlockingIOError, InterruptedError):
+                break
+            try:
+                m = json.loads(data.decode("utf-8"))
+            except ValueError:
+                continue
+            if m.get("type") == "status":
+                self.ok = 1.0 if m.get("ok") else 0.0
+                self.next_poll = time.time() + float(m.get("next", 0))
+            elif m.get("type") == "post" and m.get("slug") in self.kws and m.get("id") not in self.seen_set:
+                self.seen.append(m["id"]); self.seen_set.add(m["id"])
+                self.queue.append((m["slug"], m)); fresh = True
+        if fresh:
+            self.seen_set = set(self.seen)
+            save_json(STATE_PATH, {"seen": list(self.seen)})
+
     def release(self, slug, p):
         now = time.time()
         self.heat[slug] = min(1.0, self.heat[slug] + float(self.cfg.get("heat_per_post", 0.25)))
@@ -225,10 +253,14 @@ class Bridge:
         start = last = time.time()
         next_release = 0.0
         log("展示模式" if self.demo else f"追蹤關鍵字:{'、'.join(self.kws.values())}")
+        if self.browser:
+            log(f"瀏覽器模式:等待偽 Chrome 的「Threads 蒐集」送資料(port {self.inbox.getsockname()[1]})")
         log(f"OSC → {self.cfg['osc_host']} 數值:{self.cfg['osc_port_values']} 串文:{self.cfg['osc_port_posts']}")
         while duration is None or time.time() - start < duration:
             now = time.time()
-            if self.demo:
+            if self.browser:
+                self.drain()
+            elif self.demo:
                 if now >= self.next_poll:
                     self.queue.append(demo_posts(self.kws))
                     self.next_poll = now + random.uniform(1.5, 6.0)
@@ -255,11 +287,18 @@ def main():
     ap = argparse.ArgumentParser(description="Threads 關鍵字 → TouchDesigner(OSC)")
     ap.add_argument("--demo", action="store_true", help="展示模式,不連網")
     ap.add_argument("--refresh", action="store_true", help="只更新 access token")
+    ap.add_argument("--browser", action="store_true", help="瀏覽器模式,接收偽 Chrome 蒐集器的資料")
     ap.add_argument("--duration", type=float, help=argparse.SUPPRESS)   # 測試用
     args = ap.parse_args()
 
     example = load_json(os.path.join(HERE, "config.example.json"), {})
     cfg = {**example, **load_json(CONFIG_PATH, {})}
+    if args.browser:
+        try:
+            Bridge(cfg, demo=False, browser=True).run(args.duration)
+        except KeyboardInterrupt:
+            log("已停止")
+        return
     if not args.demo and not cfg.get("access_token", "").strip():
         sys.exit("找不到 access token:把 config.example.json 複製成 config.json,填入 access_token。\n"
                  "想先看效果,用 --demo 執行。")
