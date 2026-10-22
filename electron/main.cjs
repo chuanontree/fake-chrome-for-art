@@ -88,6 +88,7 @@ function threadsItems(){
     { label: "打開設定檔", click: () => collector.openConfig() },
     { type: "separator" },
     { label: "資料結構實測(約 5 分鐘)", enabled: !collector.isProbing(), click: () => collector.probe() },
+    { label: "事件實測(約 12 分鐘)", enabled: !collector.isProbing(), click: () => collector.probeEvents() },
   ];
 }
 
