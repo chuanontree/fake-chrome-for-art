@@ -255,17 +255,120 @@ function schemaTable(stats, total){
   return ["| 欄位路徑 | 有值 | 型別 | 範圍 / 說明 |", "|---|---|---|---|", ...rows];
 }
 
-async function visit(url){
+/* 往下捲:整頁加上所有可捲動的內層容器(Threads 的回覆列表捲在內層) */
+const SCROLL_ALL = `(() => {
+  window.scrollBy(0, innerHeight * 1.5);
+  for(const el of document.querySelectorAll("div, main, section")){
+    if(el.scrollHeight > el.clientHeight + 50){
+      const s = getComputedStyle(el).overflowY;
+      if(s === "auto" || s === "scroll") el.scrollTop += el.clientHeight * 1.5;
+    }
+  }
+})()`;
+
+async function visit(url, scrolls = 2, afterScroll = null){
   try{ await bot.loadURL(url); }catch(e){ if(!String(e).includes("ERR_ABORTED")) log("載入失敗:", e.message); }
   await sleep(between([3, 6]));
   if(needsLogin()) return false;
   await harvestEmbedded();
-  for(let s = 0; s < 2; s++){
-    try{ await bot.webContents.executeJavaScript("window.scrollBy(0, innerHeight * 1.5)"); }catch(e){}
+  afterScroll?.(0);
+  for(let s = 1; s <= scrolls; s++){
+    try{ await bot.webContents.executeJavaScript(SCROLL_ALL); }catch(e){}
     await sleep(between(cfg.scroll_gap_sec));
     await harvestEmbedded();
+    afterScroll?.(s);
   }
   return true;
+}
+
+/* ── 事件實測:回覆找得到根貼文嗎?回覆串載入得到多少?回覆數隔幾分鐘會變嗎? ──
+   報告只有數字與是非,沒有內文、帳號、ID。 */
+const tpa = p => p.raw?.text_post_app_info || {};
+const counts = p => ({ 回覆: tpa(p).direct_reply_count, 讚: p.raw?.like_count, 引用: tpa(p).quote_count, 轉發: tpa(p).repost_count });
+const median = a => { const s = [...a].sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : "—"; };
+
+async function probeEvents(){
+  if(probing) return;
+  probing = true;
+  changed();
+  const wasRunning = running;
+  if(wasRunning) stop();
+  loadConfig();
+  if(!bot) makeBot();
+  const origin = new URL(cfg.search_url).origin;
+  const pageOf = p => `${origin}/@${encodeURIComponent(p.username)}/post/${encodeURIComponent(p.code)}`;
+  const lines = ["# Threads 事件實測", "", `時間:${new Date().toLocaleString()}`, "",
+    "只有數字與是非;沒有任何內文、帳號、ID。", "", "## 1. 搜尋頁:命中的是根貼文還是回覆", ""];
+  const revisit = [];
+  try{
+    log("事件實測開始(約 12 分鐘)");
+    const plan = [], hitKws = new Map();
+    for(const [, kw] of Object.entries(cfg.keywords)){
+      const found = new Map();
+      probeSink = p => { if(!found.has(p.id)) found.set(p.id, p); };
+      if(!await visit(cfg.search_url.replace("%s", encodeURIComponent(kw)))){
+        lines.push("**需要登入 Threads,實測中止。**"); bot.show(); return;
+      }
+      const hits = [...found.values()].filter(p => p.text.includes(kw));
+      const roots = hits.filter(p => !tpa(p).is_reply), replies = hits.filter(p => tpa(p).is_reply);
+      hits.forEach(p => hitKws.set(p.id, (hitKws.get(p.id) || 0) + 1));
+      lines.push(`- 「${kw}」:讀到 ${found.size} 則,含關鍵字 ${hits.length} 則(根貼文 ${roots.length}、回覆 ${replies.length});` +
+        `根貼文回覆數中位數 ${median(roots.map(p => tpa(p).direct_reply_count || 0))}`);
+      const byReplies = (a, b) => (tpa(b).direct_reply_count || 0) - (tpa(a).direct_reply_count || 0);
+      if(roots.length) plan.push({ kw, kind: "根貼文", post: roots.sort(byReplies)[0] });
+      if(replies.length) plan.push({ kw, kind: "回覆", post: replies.sort(byReplies)[0] });
+      await sleep(between(cfg.keyword_gap_sec));
+    }
+    lines.push(`- 同一則被兩個以上關鍵字命中:${[...hitKws.values()].filter(n => n > 1).length} 則`);
+
+    lines.push("", "## 2. 串文頁:找得到根貼文嗎?回覆載入多少?", "");
+    for(const item of plan){
+      const objs = new Map(), growth = [];
+      probeSink = p => { if(!objs.has(p.id)) objs.set(p.id, p); };
+      if(!await visit(pageOf(item.post), 5, () => growth.push(objs.size))) break;
+      const all = [...objs.values()];
+      const root = all.find(p => !tpa(p).is_reply);
+      const replies = all.filter(p => tpa(p).is_reply);
+      const levels = all.map(p => tpa(p).reply_level).filter(v => typeof v === "number");
+      const dist = [0, 1, 2, 3, 4].map(l => levels.filter(v => v === l).length).join("/");
+      let s = `- 「${item.kw}」的${item.kind}頁:串文物件 ${all.length}(每次捲動後累計 ${growth.join("→")})、` +
+              `不重複帳號 ${new Set(all.map(p => p.username)).size}、reply_level 0/1/2/3/4 = ${dist}`;
+      if(item.kind === "回覆"){
+        const want = tpa(item.post).root_post_author?.username;
+        s += `;找到根貼文:${root ? "是" : "否"}` + (root && want ? `,與回覆記錄的根作者${root.username === want ? "相符" : "不符"}` : "");
+      }
+      if(root){
+        const total = tpa(root).direct_reply_count || 0;
+        s += `;根貼文回覆數 ${total},實際載入回覆 ${replies.length}`;
+        if(!revisit.some(r => r.id === root.id)) revisit.push({ id: root.id, kw: item.kw, url: pageOf(root), at: Date.now(), before: counts(root) });
+      }
+      lines.push(s);
+      await sleep(between(cfg.keyword_gap_sec));
+    }
+
+    lines.push("", "## 3. 隔幾分鐘再看同一則根貼文:數字會變嗎?", "");
+    for(const r of revisit.slice(0, 3)){
+      const wait = r.at + (cfg.probe_revisit_min ?? 5) * 60000 - Date.now();   // 測試時可縮短
+      if(wait > 0) await sleep(wait);
+      let again = null;
+      probeSink = p => { if(p.id === r.id) again = p; };
+      if(!await visit(r.url, 0)) break;
+      const mins = ((Date.now() - r.at) / 60000).toFixed(1);
+      if(!again){ lines.push(`- 「${r.kw}」:${mins} 分鐘後再看,沒讀到同一則`); continue; }
+      const after = counts(again);
+      lines.push(`- 「${r.kw}」:${mins} 分鐘後 ` + Object.keys(after).map(k => `${k} ${r.before[k]}→${after[k]}`).join("、"));
+      await sleep(between(cfg.keyword_gap_sec));
+    }
+  } finally {
+    probeSink = null;
+    probing = false;
+    changed();
+    const file = path.join(app.getPath("desktop"), "Threads事件實測.md");
+    fs.writeFileSync(file, lines.join("\n") + "\n", "utf8");
+    log(`事件實測完成:${file}`);
+    shell.openPath(file);
+    if(wasRunning) start();
+  }
 }
 
 async function probe(){
@@ -319,7 +422,7 @@ async function probe(){
 }
 
 module.exports = {
-  probe,
+  probe, probeEvents,
   isProbing: () => probing,
   init(){
     loadConfig();
