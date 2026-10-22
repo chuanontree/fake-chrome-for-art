@@ -89,6 +89,8 @@ function threadsItems(){
     { type: "separator" },
     { label: "資料結構實測(約 5 分鐘)", enabled: !collector.isProbing(), click: () => collector.probe() },
     { label: "事件實測(約 18 分鐘)", enabled: !collector.isProbing(), click: () => collector.probeEvents() },
+    { type: "separator" },
+    { label: "精準度評估取樣(約 1 小時)", enabled: !collector.isProbing(), click: () => collector.evalSample() },
   ];
 }
 

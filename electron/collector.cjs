@@ -1,27 +1,37 @@
 /* ═══════════════════════════════════════════════════════════
-   Threads 關鍵字蒐集器(電腦版)
-   用一個看不見的視窗,以你在偽 Chrome 裡登入的帳號,定期打開 Threads 搜尋頁,
-   讀取頁面載入的串文資料,送給 td-threads/bridge/threads_bridge.py --browser,
-   再由它算熱度、匿名化、存 CSV、送 OSC 進 TouchDesigner。
+   Threads 蒐集器(電腦版)—《蜂窩性組織言》的資料來源工具
+   用一個看不見的視窗,以你在偽 Chrome 裡登入的帳號(另開的帳號),以人的節奏
+   打開 Threads 的搜尋頁與串文頁,讀頁面載入的資料,把「事件」的觀察值
+   (只有數字:回覆數、讚數、引用數、回覆樣本)送給 td-threads/bridge/threads_bridge.py --browser。
+   不送任何貼文文字或帳號;事件 ID 由橋接程式一收到就雜湊。
 
-   · 預設關閉,由「Threads 蒐集」選單開啟。
-   · 以人的節奏瀏覽:每輪間隔、關鍵字之間、捲動之間都有隨機停頓。
-   · 不碰帳號建立、登入或驗證;需要登入時會把視窗叫出來讓你自己登入。
-   · 讀的是頁面帶的資料(JSON),不是畫面樣式,Threads 改版面時比較不會壞。
+   · 事件 = 根貼文。關鍵字只用來發現候選:「最新」為主、「熱門」為輔(每幾輪看一次)。
+   · 命中的是回覆時,打開它的頁面找根貼文;根貼文被刪除時,改用回覆鏈最上層看得到的那則。
+   · 每輪重看追蹤中的事件,讓橋接程式算回覆速度與生命週期。
+   · 只開搜尋頁與串文頁,不開推薦動態。不碰帳號註冊、登入或驗證。
+   · 預設關閉,由「⋮ → Threads 蒐集」開啟。
    ═══════════════════════════════════════════════════════════ */
 const { app, BrowserWindow, shell } = require("electron");
 const dgram = require("dgram");
 const fs = require("fs");
 const path = require("path");
+const O = require("./observe.cjs");
 
 const DEFAULTS = {
   enabled: false,                              // true = 開程式就開始蒐集
   keywords: { flame: "炎上", trial: "公審", boycott: "抵制" },   // 要跟 bridge 的 config.json 一致
   interval_min: 15,                            // 每輪間隔(分鐘,實際會 ±15% 隨機)
-  keyword_gap_sec: [20, 45],                   // 同一輪內關鍵字之間停多久
+  keyword_gap_sec: [20, 45],                   // 每開一頁之間停多久
   scrolls: 3,                                  // 每個搜尋頁往下捲幾次
   scroll_gap_sec: [2, 5],
-  require_keyword_in_text: true,               // 只收內文真的含關鍵字的串文
+  pages_per_round: 12,                         // 每輪最多開幾頁(搜尋頁 + 串文頁)
+  top_every_rounds: 4,                         // 每幾輪看一次「熱門」
+  thread_scrolls: 4,                           // 事件頁往下捲幾次(載入回覆樣本)
+  root_fallback: "deleted_only",               // 根貼文被刪除才退到回覆鏈最上層;"always" = 沒載入也退
+  quiet_min: 60,                               // 這麼久沒有新回覆就不再追蹤(要跟 bridge 的 events.quiet_min 一致)
+  max_tracked: 40,                             // 同時追蹤上限
+  eval_target: 100,                            // 精準度評估抽幾則
+  eval_gap_sec: [8, 15],                       // 評估取樣時每開一頁之間停多久
   search_url: "https://www.threads.com/search?q=%s&serp_type=default&filter=recent",
   bridge_host: "127.0.0.1",
   bridge_port: 7010,
@@ -31,9 +41,9 @@ const configPath = () => process.env.CHUANONTREE_COLLECTOR_CONFIG
   || path.join(app.getPath("userData"), "collector.json");
 
 let cfg, bot, timer = null, running = false, quitting = false;
-let current = null;                            // 正在搜尋的 { slug, kw }
-let ok = true, nextAt = 0, statusTimer = null;
-const seen = new Set();
+let ok = true, nextAt = 0, statusTimer = null, seq = 0, roundNo = 0;
+const tracked = new Map();                     // 事件 id -> { url, replies, lastChange, lastVisit, sampled }
+const replyRoot = new Map();                   // 回覆 id -> 事件 id(null = 找不到根貼文)
 const udp = dgram.createSocket("udp4");
 const listeners = new Set();                   // 選單用:狀態改變時重畫
 
@@ -50,7 +60,7 @@ function loadConfig(){
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const between = ([a, b]) => (a + Math.random() * (b - a)) * 1000;
-const send = obj => udp.send(Buffer.from(JSON.stringify(obj)), cfg.bridge_port, cfg.bridge_host);
+const send = obj => udp.send(Buffer.from(JSON.stringify({ ...obj, seq: ++seq })), cfg.bridge_port, cfg.bridge_host);
 /* 同時印出並送給橋接程式,讓黑色視窗看得到蒐集器在做什麼 */
 const log = (...a) => {
   console.log(new Date().toTimeString().slice(0, 8), "[蒐集]", ...a);
@@ -58,54 +68,12 @@ const log = (...a) => {
 };
 const changed = () => listeners.forEach(f => f());
 
-/* ── 從任何 JSON 裡找出「串文」:有 code、caption.text、user.username 的物件 ── */
-function findPosts(root, out = []){
-  const stack = [root];
-  while(stack.length){
-    const o = stack.pop();
-    if(!o || typeof o !== "object") continue;
-    if(typeof o.code === "string" && typeof o.caption?.text === "string" && typeof o.user?.username === "string"){
-      out.push({
-        id: String(o.pk || o.id || o.code),
-        code: o.code,
-        text: o.caption.text,
-        username: o.user.username,
-        taken_at: o.taken_at,
-        raw: o,
-      });
-    }
-    for(const k in o) if(o[k] && typeof o[k] === "object") stack.push(o[k]);
-  }
-  return out;
-}
-
-function parseJsonish(text){
-  const s = text.replace(/^\s*for\s*\(;;\);/, "");
-  try{ return [JSON.parse(s)]; }catch(e){}
-  return s.split("\n").map(l => { try{ return JSON.parse(l); }catch(e){ return null; } }).filter(Boolean);
-}
-
-let probeSink = null;   // 資料結構實測進行中時,資料改送到這裡,不送給橋接程式
+/* 讀頁面時,串文物件送到 sink(由 readPage / 實測工具設定) */
+let sink = null;
 let probing = false;
 
 function harvest(text){
-  if(probeSink){ if(text && text.length >= 20) parseJsonish(text).forEach(j => findPosts(j).forEach(probeSink)); return; }
-  if(!current || !text || text.length < 20) return;
-  const { slug, kw } = current;
-  for(const json of parseJsonish(text)){
-    for(const p of findPosts(json)){
-      if(seen.has(p.id)) continue;
-      if(cfg.require_keyword_in_text && !p.text.includes(kw)) continue;
-      seen.add(p.id);
-      if(seen.size > 20000) seen.delete(seen.values().next().value);
-      send({
-        type: "post", slug, keyword: kw, id: p.id, text: p.text, username: p.username,
-        timestamp: p.taken_at ? new Date(p.taken_at * 1000).toISOString() : "",
-        permalink: `https://www.threads.com/@${p.username}/post/${p.code}`,
-      });
-      current.n++;
-    }
-  }
+  if(sink && text && text.length >= 20) O.parseJsonish(text).forEach(j => O.findPosts(j).forEach(sink));
 }
 
 /* ── 看不見的瀏覽視窗(跟偽 Chrome 共用登入)── */
@@ -150,36 +118,97 @@ function needsLogin(){
   return /\/login|accounts\/login/.test(u);
 }
 
+const origin = () => new URL(cfg.search_url).origin;
+const searchUrl = (mode, q) => `${origin()}/search?q=${encodeURIComponent(q)}&serp_type=${mode === "標籤" ? "tags" : "default"}` +
+                               (mode === "最新" ? "&filter=recent" : "");
+const pageOf = p => `${origin()}/@${encodeURIComponent(p.username)}/post/${encodeURIComponent(p.code)}`;
+const emit = (p, extra) => send(O.obsOf(p, extra));
+
+/* 打開一頁,回傳頁面上的串文物件;需要登入時回傳 null */
+async function readPage(url, scrolls){
+  const found = new Map();
+  sink = p => { if(!found.has(p.id)) found.set(p.id, p); };
+  try{ return (await visit(url, scrolls)) ? [...found.values()] : null; }
+  finally{ sink = null; }
+}
+
+function loginNeeded(){
+  ok = false;
+  log("需要登入 Threads:已打開蒐集視窗,請在裡面登入,下一輪會自動繼續");
+  bot.show();
+}
+
+function track(p){
+  const replies = O.tpa(p).direct_reply_count ?? 0;
+  const t = tracked.get(p.id);
+  if(!t){
+    if(tracked.size >= cfg.max_tracked){
+      const stalest = [...tracked.entries()].sort((a, b) => a[1].lastChange - b[1].lastChange)[0][0];
+      tracked.delete(stalest);
+    }
+    tracked.set(p.id, { url: pageOf(p), replies, lastChange: Date.now(), lastVisit: 0, sampled: 0 });
+  } else if(replies > t.replies){
+    t.replies = replies; t.lastChange = Date.now();
+  }
+}
+
+/* 一輪:搜尋 → 回覆找事件 → 重看事件。總頁數不超過 pages_per_round。 */
 async function round(){
   timer = null;
   if(!running) return;
   ok = true;
-  /* 每輪都重送全部:橋接程式會去重。這樣橋接程式晚開、重開,都不會漏掉資料 */
-  seen.clear();
-  const list = Object.entries(cfg.keywords);
-  for(let i = 0; i < list.length && running; i++){
-    const [slug, kw] = list[i];
-    current = { slug, kw, n: 0 };
-    try{ await bot.loadURL(cfg.search_url.replace("%s", encodeURIComponent(kw))); }
-    catch(e){ if(!String(e).includes("ERR_ABORTED")){ ok = false; log("載入失敗:", e.message); } }
-    await sleep(between([3, 6]));
-    if(needsLogin()){
-      ok = false;
-      log("需要登入 Threads:已打開蒐集視窗,請在裡面登入,下一輪會自動繼續");
-      bot.show();
-      break;
+  roundNo++;
+  const budget = cfg.pages_per_round;
+  const modes = ["最新", ...((roundNo - 1) % cfg.top_every_rounds === 0 ? ["熱門"] : [])];
+  const stat = { pages: 0, hits: 0, roots: 0, replies: 0, resolved: 0, unresolved: 0, revisited: 0 };
+  const gap = () => sleep(between(cfg.keyword_gap_sec));
+  const pending = [];
+
+  search: for(const [, kw] of Object.entries(cfg.keywords)){
+    for(const mode of modes){
+      if(!running) return;
+      const posts = await readPage(searchUrl(mode, kw), cfg.scrolls); stat.pages++;
+      if(!posts){ loginNeeded(); break search; }
+      for(const p of posts.filter(p => O.isHit(p, kw) && !O.isGone(p))){
+        stat.hits++;
+        if(!O.tpa(p).is_reply){ stat.roots++; emit(p, { kw, source: mode }); track(p); }
+        else if(replyRoot.has(p.id)){ const ev = replyRoot.get(p.id); if(ev) send({ type: "obs", id: ev, kw, source: mode }); }
+        else if(!pending.some(x => x.p.id === p.id)){ stat.replies++; pending.push({ p, kw, mode }); }
+      }
+      await gap();
     }
-    await harvestEmbedded();
-    for(let s = 0; s < cfg.scrolls && running; s++){
-      try{ await bot.webContents.executeJavaScript("window.scrollBy(0, innerHeight * 1.5)"); }catch(e){}
-      await sleep(between(cfg.scroll_gap_sec));
-      await harvestEmbedded();
-    }
-    log(`搜尋「${kw}」:讀到 ${current.n} 則含關鍵字的串文`);
-    current = null;
-    if(i < list.length - 1) await sleep(between(cfg.keyword_gap_sec));
   }
-  current = null;
+
+  /* 命中的回覆 → 打開它的頁面找事件(新的回覆優先;留三分之一頁數給重看) */
+  pending.sort((a, b) => (b.p.taken_at || 0) - (a.p.taken_at || 0));
+  const reserve = Math.min(tracked.size, Math.floor(budget / 3));
+  for(const { p, kw, mode } of pending){
+    if(!running || !ok || stat.pages >= budget - reserve) break;
+    const posts = await readPage(pageOf(p), 0); stat.pages++;
+    if(!posts){ loginNeeded(); break; }
+    const r = O.resolveEvent(posts, cfg.root_fallback);
+    replyRoot.set(p.id, r.event ? r.event.id : null);
+    if(r.event){ stat.resolved++; emit(r.event, { kw, source: mode, fallback: r.fallback }); track(r.event); }
+    else stat.unresolved++;
+    await gap();
+  }
+
+  /* 重看追蹤中的事件:還沒看過自己頁面的優先,其次最久沒看的 */
+  const order = [...tracked.entries()].sort((a, b) => (a[1].sampled - b[1].sampled) || (a[1].lastVisit - b[1].lastVisit));
+  for(const [id, t] of order){
+    if(!running || !ok || stat.pages >= budget) break;
+    const posts = await readPage(t.url, cfg.thread_scrolls); stat.pages++;
+    if(!posts){ loginNeeded(); break; }
+    t.lastVisit = Date.now();
+    const e = posts.find(p => p.id === id);
+    if(e){ t.sampled = 1; stat.revisited++; emit(e, { sample: O.sampleOf(posts, id) }); track(e); }
+    await gap();
+  }
+
+  for(const [id, t] of tracked) if(Date.now() - t.lastChange > cfg.quiet_min * 60000) tracked.delete(id);
+  while(replyRoot.size > 5000) replyRoot.delete(replyRoot.keys().next().value);
+  log(`第 ${roundNo} 輪(${modes.join("+")}):開了 ${stat.pages} 頁;命中 ${stat.hits} 則(根貼文 ${stat.roots}、新的回覆 ${stat.replies});` +
+      `回覆找到事件 ${stat.resolved}、找不到 ${stat.unresolved};重看事件 ${stat.revisited};追蹤中 ${tracked.size}`);
   if(!running) return;
   const wait = cfg.interval_min * 60000 * (0.85 + Math.random() * 0.3);
   nextAt = Date.now() + wait;
@@ -204,7 +233,6 @@ function stop(){
   running = false;
   clearTimeout(timer); timer = null;
   clearInterval(statusTimer);
-  current = null;
   log("已停止蒐集");
   changed();
 }
@@ -319,7 +347,7 @@ async function probeEvents(){
       const byMode = {};
       for(const [mode, url] of Object.entries(MODES)){
         const found = new Map();
-        probeSink = p => { if(!found.has(p.id)) found.set(p.id, p); };
+        sink = p => { if(!found.has(p.id)) found.set(p.id, p); };
         if(!await visit(url(kw))){
           lines.push("", "**需要登入 Threads,實測中止。**"); bot.show(); return;
         }
@@ -347,7 +375,7 @@ async function probeEvents(){
     lines.push("", "## 2. 串文頁:找得到根貼文嗎?回覆載入多少?", "");
     for(const item of plan){
       const objs = new Map(), growth = [];
-      probeSink = p => { if(!objs.has(p.id)) objs.set(p.id, p); };
+      sink = p => { if(!objs.has(p.id)) objs.set(p.id, p); };
       if(!await visit(pageOf(item.post), 5, () => growth.push(objs.size))) break;
       const all = [...objs.values()];
       const root = all.find(p => !tpa(p).is_reply);
@@ -374,7 +402,7 @@ async function probeEvents(){
       const wait = r.at + (cfg.probe_revisit_min ?? 5) * 60000 - Date.now();   // 測試時可縮短
       if(wait > 0) await sleep(wait);
       let again = null;
-      probeSink = p => { if(p.id === r.id) again = p; };
+      sink = p => { if(p.id === r.id) again = p; };
       if(!await visit(r.url, 0)) break;
       const mins = ((Date.now() - r.at) / 60000).toFixed(1);
       if(!again){ lines.push(`- 「${r.kw}」:${mins} 分鐘後再看,沒讀到同一則`); continue; }
@@ -387,7 +415,7 @@ async function probeEvents(){
     if(!tagged.length) lines.push("- 這次命中的根貼文都沒有主題標籤");
     for(const t of tagged.slice(0, 3)){
       const found = new Map();
-      probeSink = p => { if(!found.has(p.id)) found.set(p.id, p); };
+      sink = p => { if(!found.has(p.id)) found.set(p.id, p); };
       if(!await visit(MODES.標籤(t.tag))) break;
       const all = [...found.values()];
       const same = all.filter(p => tpa(p).tag_header?.display_name === t.tag);
@@ -397,7 +425,7 @@ async function probeEvents(){
       await sleep(between(cfg.keyword_gap_sec));
     }
   } finally {
-    probeSink = null;
+    sink = null;
     probing = false;
     changed();
     const file = path.join(app.getPath("desktop"), "Threads事件實測.md");
@@ -426,7 +454,7 @@ async function probe(){
     const kws = Object.values(cfg.keywords);
     for(let i = 0; i < kws.length; i++){
       const found = new Map();
-      probeSink = p => { if(!found.has(p.id)){ found.set(p.id, p); schemaAdd(search, p.raw); nSearch++; } };
+      sink = p => { if(!found.has(p.id)){ found.set(p.id, p); schemaAdd(search, p.raw); nSearch++; } };
       if(!await visit(cfg.search_url.replace("%s", encodeURIComponent(kws[i])))){
         lines.push("**需要登入 Threads,實測中止。請在蒐集視窗登入後重跑。**"); bot.show(); break;
       }
@@ -438,14 +466,14 @@ async function probe(){
     for(const c of candidates){
       const users = new Set();
       let n = 0;
-      probeSink = p => { n++; users.add(p.username); schemaAdd(thread, p.raw); nThread++; };
+      sink = p => { n++; users.add(p.username); schemaAdd(thread, p.raw); nThread++; };
       const origin = new URL(cfg.search_url).origin;
       if(!await visit(`${origin}/@${encodeURIComponent(c.username)}/post/${encodeURIComponent(c.code)}`)) break;
       lines.push(`- 「${c.kw}」的一則串文頁:${n} 個串文物件(含重複出現)、不重複帳號 ${users.size}`);
       await sleep(between(cfg.keyword_gap_sec));
     }
   } finally {
-    probeSink = null;
+    sink = null;
     probing = false;
     changed();
   }
@@ -458,8 +486,90 @@ async function probe(){
   if(wasRunning) start();
 }
 
+/* ── 精準度評估取樣 ──
+   從「熱門」「最新」各抽一半,共 eval_target 則候選,找出各自的事件、讀事件的數字,寫成兩個檔:
+     標記.csv  — 編號、命中貼文與事件根貼文的原文、空白的「你的標記」欄(只在本機暫存資料夾,評估完由 evaluate.py 刪除)
+     指標.csv  — 編號與事件的數字(沒有文字)
+   兩個檔分開,標記時看不到指標,不會被數字影響判斷。 */
+const csvCell = v => { const s = v === null || v === undefined ? "" : String(v); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+const writeCsv = (file, rows) => fs.writeFileSync(file, "﻿" + rows.map(r => r.map(csvCell).join(",")).join("\r\n") + "\r\n", "utf8");
+
+async function evalSample(){
+  if(probing) return;
+  probing = true;
+  changed();
+  const wasRunning = running;
+  if(wasRunning) stop();
+  loadConfig();
+  if(!bot) makeBot();
+  const dir = path.join(app.getPath("temp"), "蜂窩性組織言_評估");
+  fs.mkdirSync(dir, { recursive: true });
+  const gap = () => sleep(between(cfg.eval_gap_sec));
+  const kws = Object.values(cfg.keywords);
+  const per = Math.ceil(cfg.eval_target / (kws.length * 2));
+  let cands = [];
+  const taken = new Set(), events = new Map();
+  try{
+    log(`精準度評估取樣開始:目標 ${cfg.eval_target} 則(約 1 小時)`);
+    collect: for(const kw of kws){
+      for(const mode of ["熱門", "最新"]){
+        const posts = await readPage(searchUrl(mode, kw), cfg.scrolls + 2);
+        if(!posts){ loginNeeded(); break collect; }
+        const hits = posts.filter(p => O.isHit(p, kw) && !O.isGone(p) && !taken.has(p.id)).slice(0, per);
+        hits.forEach(h => { taken.add(h.id); cands.push({ h, kw, mode }); });
+        log(`評估取樣:「${kw}」${mode} 取 ${hits.length} 則`);
+        await gap();
+      }
+    }
+    cands = cands.slice(0, cfg.eval_target);
+    for(let i = 0; i < cands.length && ok; i++){
+      const c = cands[i];
+      let ev = c.h, fallback = null;
+      if(O.tpa(c.h).is_reply){
+        const posts = await readPage(pageOf(c.h), 0);
+        if(!posts){ loginNeeded(); break; }
+        const r = O.resolveEvent(posts, cfg.root_fallback);
+        ev = r.event; fallback = r.fallback;
+        await gap();
+      }
+      if(ev && !events.has(ev.id)){
+        const posts = await readPage(pageOf(ev), cfg.thread_scrolls) || [];
+        events.set(ev.id, { no: events.size + 1, ev: posts.find(p => p.id === ev.id) || ev, sample: O.sampleOf(posts, ev.id) });
+        await gap();
+      }
+      c.event = ev ? events.get(ev.id) : null;
+      c.fallback = fallback;
+      if((i + 1) % 10 === 0) log(`評估取樣:已處理 ${i + 1} / ${cands.length}`);
+    }
+    const now = Date.now() / 1000;
+    writeCsv(path.join(dir, "標記.csv"), [
+      ["編號", "來源", "關鍵字", "命中類型", "命中貼文", "事件根貼文(與命中貼文不同時)", "你的標記(是/否)"],
+      ...cands.map((c, i) => [i + 1, c.mode, c.kw, O.tpa(c.h).is_reply ? "回覆" : "根貼文", c.h.text,
+                              c.event && c.event.ev.id !== c.h.id ? c.event.ev.text : "", ""]),
+    ]);
+    writeCsv(path.join(dir, "指標.csv"), [
+      ["編號", "來源", "關鍵字", "命中類型", "事件序號", "替代根貼文", "回覆數", "讚數", "引用數", "轉發數",
+       "事件距今小時", "樣本回覆", "樣本帳號", "深層比例"],
+      ...cands.map((c, i) => {
+        const e = c.event, t = e ? O.tpa(e.ev) : {};
+        return [i + 1, c.mode, c.kw, O.tpa(c.h).is_reply ? "回覆" : "根貼文", e ? e.no : "", c.fallback || "",
+                e ? t.direct_reply_count ?? "" : "", e ? e.ev.raw?.like_count ?? "" : "", e ? t.quote_count ?? "" : "",
+                e ? t.repost_count ?? "" : "", e && e.ev.taken_at ? ((now - e.ev.taken_at) / 3600).toFixed(1) : "",
+                e ? e.sample.n : "", e ? e.sample.participants : "", e ? e.sample.deep_share.toFixed(2) : ""];
+      }),
+    ]);
+    log(`精準度評估取樣完成:${cands.length} 則、${events.size} 個事件 → ${dir}`);
+  } finally {
+    sink = null;
+    probing = false;
+    changed();
+    shell.openPath(dir);
+    if(wasRunning) start();
+  }
+}
+
 module.exports = {
-  probe, probeEvents,
+  probe, probeEvents, evalSample,
   isProbing: () => probing,
   init(){
     loadConfig();
@@ -471,6 +581,6 @@ module.exports = {
   toggleWindow(){ if(!bot) makeBot(); bot.isVisible() ? bot.hide() : bot.show(); },
   openConfig(){ loadConfig(); shell.openPath(configPath()); },
   onChange: f => listeners.add(f),
-  _findPosts: findPosts,   // 測試用
+  _findPosts: O.findPosts,   // 測試用
   _schemaAdd: schemaAdd, _schemaTable: schemaTable,
 };

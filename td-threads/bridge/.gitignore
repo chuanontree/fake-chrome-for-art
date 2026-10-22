@@ -2,3 +2,7 @@ config.json
 state.json
 *.tmp
 threads_log.csv
+events_log*.csv
+recordings/
+__pycache__/
+評估報告_*.md
