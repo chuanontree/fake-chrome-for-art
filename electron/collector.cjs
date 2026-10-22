@@ -71,6 +71,7 @@ function findPosts(root, out = []){
         text: o.caption.text,
         username: o.user.username,
         taken_at: o.taken_at,
+        raw: o,
       });
     }
     for(const k in o) if(o[k] && typeof o[k] === "object") stack.push(o[k]);
@@ -84,7 +85,11 @@ function parseJsonish(text){
   return s.split("\n").map(l => { try{ return JSON.parse(l); }catch(e){ return null; } }).filter(Boolean);
 }
 
+let probeSink = null;   // 資料結構實測進行中時,資料改送到這裡,不送給橋接程式
+let probing = false;
+
 function harvest(text){
+  if(probeSink){ if(text && text.length >= 20) parseJsonish(text).forEach(j => findPosts(j).forEach(probeSink)); return; }
   if(!current || !text || text.length < 20) return;
   const { slug, kw } = current;
   for(const json of parseJsonish(text)){
@@ -204,7 +209,118 @@ function stop(){
   changed();
 }
 
+/* ── 資料結構實測:Threads 網頁的串文物件裡有哪些欄位可當事件指標 ──
+   只記欄位路徑、型別、有值比例、數字範圍;文字只記長度,ID 類只記「有」。
+   不記任何內文、帳號、ID。報告存到桌面。 */
+const ID_KEY = /(^|_)(pk|id|fbid|code|shortcode|username|full_name|url|uri|token)$/i;
+
+function schemaAdd(stats, obj, prefix = "", depth = 0){
+  if(depth > 4 || !obj || typeof obj !== "object") return;
+  for(const k of Object.keys(obj)){
+    const v = obj[k];
+    const path = prefix + (Array.isArray(obj) ? "[]" : (prefix ? "." : "") + k);
+    if(Array.isArray(obj) && k !== "0") continue;          // 陣列只看第一個元素
+    const s = stats[path] || (stats[path] = { n: 0, nonnull: 0, types: new Set(), min: null, max: null, maxlen: 0, trues: 0 });
+    s.n++;
+    if(v === null || v === undefined || v === ""){ s.types.add("null"); }
+    else{
+      s.nonnull++;
+      const t = Array.isArray(v) ? "array" : typeof v;
+      s.types.add(t);
+      if(t === "number" && !ID_KEY.test(k)){
+        s.min = s.min === null ? v : Math.min(s.min, v);
+        s.max = s.max === null ? v : Math.max(s.max, v);
+      }
+      if(t === "string") s.maxlen = Math.max(s.maxlen, v.length);
+      if(t === "boolean" && v) s.trues++;
+      if(t === "array") s.maxlen = Math.max(s.maxlen, v.length);
+    }
+    if(v && typeof v === "object") schemaAdd(stats, v, Array.isArray(v) ? path + "[]" : path, depth + 1);
+  }
+}
+
+function schemaTable(stats, total){
+  const fmt = n => n === null ? "" : (Math.abs(n) >= 1e9 ? "≥1e9" : String(n));
+  const rows = Object.keys(stats).sort().slice(0, 500).map(p => {
+    const s = stats[p];
+    const leaf = p.split(/[.\[\]]+/).filter(Boolean).pop() || p;
+    let detail = "";
+    if(ID_KEY.test(leaf)) detail = "(識別資料,不記值)";
+    else if(s.min !== null) detail = `${fmt(s.min)} ~ ${fmt(s.max)}`;
+    else if(s.types.has("string")) detail = `文字,最長 ${s.maxlen} 字`;
+    else if(s.types.has("boolean")) detail = `true ${s.trues} 次`;
+    else if(s.types.has("array")) detail = `最多 ${s.maxlen} 項`;
+    return `| \`${p}\` | ${s.nonnull}/${total} | ${[...s.types].join(",")} | ${detail} |`;
+  });
+  return ["| 欄位路徑 | 有值 | 型別 | 範圍 / 說明 |", "|---|---|---|---|", ...rows];
+}
+
+async function visit(url){
+  try{ await bot.loadURL(url); }catch(e){ if(!String(e).includes("ERR_ABORTED")) log("載入失敗:", e.message); }
+  await sleep(between([3, 6]));
+  if(needsLogin()) return false;
+  await harvestEmbedded();
+  for(let s = 0; s < 2; s++){
+    try{ await bot.webContents.executeJavaScript("window.scrollBy(0, innerHeight * 1.5)"); }catch(e){}
+    await sleep(between(cfg.scroll_gap_sec));
+    await harvestEmbedded();
+  }
+  return true;
+}
+
+async function probe(){
+  if(probing) return;
+  probing = true;
+  changed();
+  const wasRunning = running;
+  if(wasRunning) stop();
+  loadConfig();
+  if(!bot) makeBot();
+  const search = {}, thread = {};
+  let nSearch = 0, nThread = 0;
+  const lines = ["# Threads 網頁資料結構實測", "", `時間:${new Date().toLocaleString()}`, "",
+    "只記欄位結構;沒有任何內文、帳號、ID。", ""];
+  try{
+    log("資料結構實測開始(約 5 分鐘)");
+    const candidates = [];
+    const kws = Object.values(cfg.keywords);
+    for(let i = 0; i < kws.length; i++){
+      const found = new Map();
+      probeSink = p => { if(!found.has(p.id)){ found.set(p.id, p); schemaAdd(search, p.raw); nSearch++; } };
+      if(!await visit(cfg.search_url.replace("%s", encodeURIComponent(kws[i])))){
+        lines.push("**需要登入 Threads,實測中止。請在蒐集視窗登入後重跑。**"); bot.show(); break;
+      }
+      lines.push(`- 搜尋「${kws[i]}」:讀到 ${found.size} 個串文物件`);
+      candidates.push(...[...found.values()].slice(0, 2).map(p => ({ ...p, kw: kws[i] })));
+      await sleep(between(cfg.keyword_gap_sec));
+    }
+    lines.push("", "## 串文頁(根貼文 + 回覆)", "");
+    for(const c of candidates){
+      const users = new Set();
+      let n = 0;
+      probeSink = p => { n++; users.add(p.username); schemaAdd(thread, p.raw); nThread++; };
+      const origin = new URL(cfg.search_url).origin;
+      if(!await visit(`${origin}/@${encodeURIComponent(c.username)}/post/${encodeURIComponent(c.code)}`)) break;
+      lines.push(`- 「${c.kw}」的一則串文頁:${n} 個串文物件(含重複出現)、不重複帳號 ${users.size}`);
+      await sleep(between(cfg.keyword_gap_sec));
+    }
+  } finally {
+    probeSink = null;
+    probing = false;
+    changed();
+  }
+  lines.push("", `## 搜尋頁的串文物件欄位(共 ${nSearch} 個)`, "", ...schemaTable(search, nSearch),
+             "", `## 串文頁的串文物件欄位(共 ${nThread} 次)`, "", ...schemaTable(thread, nThread), "");
+  const file = path.join(app.getPath("desktop"), "Threads資料結構實測.md");
+  fs.writeFileSync(file, lines.join("\n"), "utf8");
+  log(`資料結構實測完成:${file}`);
+  shell.openPath(file);
+  if(wasRunning) start();
+}
+
 module.exports = {
+  probe,
+  isProbing: () => probing,
   init(){
     loadConfig();
     app.on("before-quit", () => { quitting = true; });
@@ -216,4 +332,5 @@ module.exports = {
   openConfig(){ loadConfig(); shell.openPath(configPath()); },
   onChange: f => listeners.add(f),
   _findPosts: findPosts,   // 測試用
+  _schemaAdd: schemaAdd, _schemaTable: schemaTable,
 };

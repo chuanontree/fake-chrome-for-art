@@ -86,6 +86,8 @@ function threadsItems(){
       click: () => collector.isRunning() ? collector.stop() : collector.start() },
     { label: "顯示 / 隱藏蒐集視窗", click: () => collector.toggleWindow() },
     { label: "打開設定檔", click: () => collector.openConfig() },
+    { type: "separator" },
+    { label: "資料結構實測(約 5 分鐘)", enabled: !collector.isProbing(), click: () => collector.probe() },
   ];
 }
 
