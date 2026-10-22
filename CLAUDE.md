@@ -42,9 +42,20 @@ css/style.css     全部樣式。前段=Chrome 擬態(勿亂動);末段=兩張�
 js/config.js      ★ 策展資料:REFUSE_LIST、起始頁捷徑、預設搜尋引擎。改這裡最頻繁
 js/browser.js     引擎:分頁 / 導覽 / 歷史。網頁版用 iframe,電腦版用 webview。一般不用動
 electron/         電腦版外殼:main.cjs(視窗、選單、快捷鍵、新視窗→新分頁)、preload.cjs、
-                  collector.cjs(Threads 蒐集:隱藏視窗讀搜尋頁資料 → UDP → td-threads bridge --browser)
-td-threads/       Threads 關鍵字 → TouchDesigner(OSC)。官方 API / 展示 / 瀏覽器三種模式
+                  collector.cjs(Threads 蒐集:事件追蹤、實測、精準度評估取樣)、
+                  observe.cjs(頁面資料 → 事件判斷的純函式,observe.test.cjs 測試)
+td-threads/       《蜂窩性組織言》資料端:Threads 事件 → TouchDesigner(OSC)。即時 / 重播 / 展示三種模式
 ```
+
+## 《蜂窩性組織言》資料端的守則
+
+- 作品是《蜂窩性組織言》(六邊形無限鏡裝置,TD 視覺)。**電腦版偽 Chrome 與蒐集器只是工具**,
+  文件與註解不要把它們寫成作品。
+- **去語意化**:蒐集器送給橋接程式的只有數字;橋接程式一收到就把事件 ID 加鹽雜湊。
+  錄製檔、事件紀錄、OSC 都**不得**出現貼文文字、帳號或原始 ID。
+- 唯一的例外是精準度評估的 `標記.csv`:只放在本機暫存資料夾,`evaluate.py` 跑完就刪除,不進 repo。
+- 事件 = 根貼文;關鍵字只是發現線索。強度只用數字指標,不看內容語氣。細節見 `td-threads/README.md`。
+- 蒐集只開搜尋頁與串文頁,不開推薦動態;維持人的節奏(每頁之間有停頓、每輪有頁數上限)。
 
 各檔職責分離:**策展改 config.js,外觀改 style.css,頁面內容改 index.html,引擎才動 browser.js。**
 

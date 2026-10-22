@@ -64,7 +64,9 @@ push 到 `main` 會透過 `.github/workflows/deploy.yml` 自動部署。
 
 詳細脈絡與守則見 `CLAUDE.md`。
 
-## 延伸:Threads 關鍵字 → TouchDesigner
+## 《蜂窩性組織言》資料端:Threads 事件 → TouchDesigner
 
-`td-threads/` 用 Threads 官方 API 追蹤「炎上 / 公審 / 抵制」,把串文與熱度即時用 OSC 送進
-TouchDesigner。步驟見 [`td-threads/README.md`](td-threads/README.md)。
+`td-threads/` 是作品《蜂窩性組織言》的資料端。電腦版的「Threads 蒐集」是取得資料的工具:
+它以「炎上 / 公審 / 抵制」為線索找出 Threads 上的**事件**(根貼文及其回覆串),
+只把去語意化的強度與生命週期用 OSC 送進 TouchDesigner,不處理貼文文字。
+步驟見 [`td-threads/README.md`](td-threads/README.md)。
