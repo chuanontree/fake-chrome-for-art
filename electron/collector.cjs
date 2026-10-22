@@ -298,28 +298,51 @@ async function probeEvents(){
   const origin = new URL(cfg.search_url).origin;
   const pageOf = p => `${origin}/@${encodeURIComponent(p.username)}/post/${encodeURIComponent(p.code)}`;
   const lines = ["# Threads 事件實測", "", `時間:${new Date().toLocaleString()}`, "",
-    "只有數字與是非;沒有任何內文、帳號、ID。", "", "## 1. 搜尋頁:命中的是根貼文還是回覆", ""];
+    "只有數字與是非;沒有任何內文、帳號、ID、標籤名稱。", "",
+    "## 1. 三種搜尋頁的比較:熱門 / 最新 / 標籤", "",
+    "「網址」欄是載入後實際停留的網址參數,用來確認 Threads 有沒有把我們導到別的分頁。", ""];
   const revisit = [];
+  /* 搜尋頁的三種模式。Threads 網頁的參數以實測結果為準(見報告「網址」欄)。 */
+  const MODES = {
+    熱門: q => `${origin}/search?q=${encodeURIComponent(q)}&serp_type=default`,
+    最新: q => `${origin}/search?q=${encodeURIComponent(q)}&serp_type=default&filter=recent`,
+    標籤: q => `${origin}/search?q=${encodeURIComponent(q)}&serp_type=tags`,
+  };
+  const params = () => { try{ const u = new URL(bot.webContents.getURL()); return [...u.searchParams].filter(([k]) => k !== "q").map(([k, v]) => `${k}=${v}`).join("&") || "(無)"; }catch(e){ return "?"; } };
+  const ageHours = p => p.taken_at ? (Date.now() / 1000 - p.taken_at) / 3600 : null;
   try{
-    log("事件實測開始(約 12 分鐘)");
-    const plan = [], hitKws = new Map();
+    log("事件實測開始(約 18 分鐘)");
+    const plan = [], hitKws = new Map(), tagged = [];
+    lines.push("| 關鍵字 | 模式 | 網址 | 讀到 | 含關鍵字 | 根貼文 / 回覆 | 根貼文回覆數中位數 | 貼文距今中位數(小時) | 帶主題標籤 |",
+               "|---|---|---|---|---|---|---|---|---|");
     for(const [, kw] of Object.entries(cfg.keywords)){
-      const found = new Map();
-      probeSink = p => { if(!found.has(p.id)) found.set(p.id, p); };
-      if(!await visit(cfg.search_url.replace("%s", encodeURIComponent(kw)))){
-        lines.push("**需要登入 Threads,實測中止。**"); bot.show(); return;
+      const byMode = {};
+      for(const [mode, url] of Object.entries(MODES)){
+        const found = new Map();
+        probeSink = p => { if(!found.has(p.id)) found.set(p.id, p); };
+        if(!await visit(url(kw))){
+          lines.push("", "**需要登入 Threads,實測中止。**"); bot.show(); return;
+        }
+        /* 內文或主題標籤含關鍵字都算命中(標籤頁的貼文內文不一定有這個字) */
+        const hits = [...found.values()].filter(p => p.text.includes(kw) || (tpa(p).tag_header?.display_name || "").includes(kw));
+        const roots = hits.filter(p => !tpa(p).is_reply), replies = hits.filter(p => tpa(p).is_reply);
+        const ages = hits.map(ageHours).filter(v => v !== null).map(v => Math.round(v));
+        byMode[mode] = new Set(hits.map(p => p.id));
+        lines.push(`| ${kw} | ${mode} | ${params()} | ${found.size} | ${hits.length} | ${roots.length} / ${replies.length} | ` +
+          `${median(roots.map(p => tpa(p).direct_reply_count || 0))} | ${median(ages)} | ${hits.filter(p => p.raw?.text_post_app_info?.tag_header).length} |`);
+        if(mode !== "標籤"){
+          hits.forEach(p => { if(!hitKws.has(p.id)) hitKws.set(p.id, new Set()); hitKws.get(p.id).add(kw); });
+          const byReplies = (a, b) => (tpa(b).direct_reply_count || 0) - (tpa(a).direct_reply_count || 0);
+          if(roots.length && !plan.some(x => x.kw === kw && x.kind === "根貼文")) plan.push({ kw, kind: "根貼文", post: roots.sort(byReplies)[0] });
+          if(replies.length && !plan.some(x => x.kw === kw && x.kind === "回覆")) plan.push({ kw, kind: "回覆", post: replies.sort(byReplies)[0] });
+          roots.forEach(p => { const t = tpa(p).tag_header?.display_name; if(t && !tagged.some(x => x.tag === t)) tagged.push({ kw, tag: t }); });
+        }
+        await sleep(between(cfg.keyword_gap_sec));
       }
-      const hits = [...found.values()].filter(p => p.text.includes(kw));
-      const roots = hits.filter(p => !tpa(p).is_reply), replies = hits.filter(p => tpa(p).is_reply);
-      hits.forEach(p => hitKws.set(p.id, (hitKws.get(p.id) || 0) + 1));
-      lines.push(`- 「${kw}」:讀到 ${found.size} 則,含關鍵字 ${hits.length} 則(根貼文 ${roots.length}、回覆 ${replies.length});` +
-        `根貼文回覆數中位數 ${median(roots.map(p => tpa(p).direct_reply_count || 0))}`);
-      const byReplies = (a, b) => (tpa(b).direct_reply_count || 0) - (tpa(a).direct_reply_count || 0);
-      if(roots.length) plan.push({ kw, kind: "根貼文", post: roots.sort(byReplies)[0] });
-      if(replies.length) plan.push({ kw, kind: "回覆", post: replies.sort(byReplies)[0] });
-      await sleep(between(cfg.keyword_gap_sec));
+      const both = [...byMode.熱門].filter(id => byMode.最新.has(id)).length;
+      lines.push(`|  | 熱門∩最新 |  |  | ${both} 則重疊 |  |  |  |  |`);
     }
-    lines.push(`- 同一則被兩個以上關鍵字命中:${[...hitKws.values()].filter(n => n > 1).length} 則`);
+    lines.push("", `- 同一則被兩個以上關鍵字命中(熱門+最新):${[...hitKws.values()].filter(s => s.size > 1).length} 則`);
 
     lines.push("", "## 2. 串文頁:找得到根貼文嗎?回覆載入多少?", "");
     for(const item of plan){
@@ -357,6 +380,20 @@ async function probeEvents(){
       if(!again){ lines.push(`- 「${r.kw}」:${mins} 分鐘後再看,沒讀到同一則`); continue; }
       const after = counts(again);
       lines.push(`- 「${r.kw}」:${mins} 分鐘後 ` + Object.keys(after).map(k => `${k} ${r.before[k]}→${after[k]}`).join("、"));
+      await sleep(between(cfg.keyword_gap_sec));
+    }
+
+    lines.push("", "## 4. 標籤擴散:根貼文帶主題標籤時,用標籤再搜一次", "");
+    if(!tagged.length) lines.push("- 這次命中的根貼文都沒有主題標籤");
+    for(const t of tagged.slice(0, 3)){
+      const found = new Map();
+      probeSink = p => { if(!found.has(p.id)) found.set(p.id, p); };
+      if(!await visit(MODES.標籤(t.tag))) break;
+      const all = [...found.values()];
+      const same = all.filter(p => tpa(p).tag_header?.display_name === t.tag);
+      lines.push(`- 「${t.kw}」命中的一則根貼文的標籤:網址 ${params()},讀到 ${all.length} 則、` +
+        `其中帶同一個標籤 ${same.length} 則、不重複帳號 ${new Set(same.map(p => p.username)).size}、` +
+        `距今中位數 ${median(same.map(ageHours).filter(v => v !== null).map(v => Math.round(v)))} 小時`);
       await sleep(between(cfg.keyword_gap_sec));
     }
   } finally {
